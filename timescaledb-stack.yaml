@@ -1,0 +1,202 @@
+namespace: timescaledb
+
+stack-db:
+  defines: runnable
+  inherits: timescaledb/base
+  metadata:
+    name: TimescaleDB Standalone Database
+    description: |
+      Secure production-oriented standalone TimescaleDB database. The PostgreSQL
+      service remains private on the Monk network and no host or internet port is
+      published by this production stack.
+    tags: timescaledb, postgresql, database, standalone, production
+    website: https://www.tigerdata.com/
+    source: https://github.com/timescale/timescaledb
+    publisher: monk.io
+    icon: https://assets-global.website-files.com/646dd1f1a3703e451ba81ecc/649dbd4c8adf2641ff9800c2_timescale-logo.svg
+    private: false
+  variables:
+    db-name:
+      type: string
+      env: POSTGRES_DB
+      value: timescaledb
+      description: PostgreSQL database name created for standalone TimescaleDB.
+    db-user:
+      type: string
+      env: POSTGRES_USER
+      value: timescaledb
+      description: PostgreSQL user created for standalone TimescaleDB.
+    db-password:
+      type: string
+      env: POSTGRES_PASSWORD
+      value: <- random-uuid
+      description: Sensitive generated PostgreSQL password for standalone deployment. Production inheritors needing stable credentials should use secret("timescaledb-db-password").
+    volume-name:
+      type: string
+      value: timescaledb-stack-postgres
+      description: Monk volume subdirectory used by the standalone TimescaleDB database.
+  checks:
+    readiness:
+      code: tcp-check-service("timescaledb/stack-db", "postgres")
+      period: 10
+      initialDelay: 15
+      attempts: 30
+
+stack:
+  defines: process-group
+  metadata:
+    name: TimescaleDB Standalone Stack
+    description: |
+      Production-oriented standalone TimescaleDB stack. It deploys a private
+      PostgreSQL-compatible TimescaleDB service with persistent storage and no
+      public exposure. Sensitive values are generated for first deploys; inherit
+      this stack and replace stack-db-password with secret("timescaledb-db-password")
+      for stable production credentials.
+    tags: timescaledb, postgresql, database, standalone, production
+    website: https://www.tigerdata.com/
+    source: https://github.com/timescale/timescaledb
+    publisher: monk.io
+    icon: https://assets-global.website-files.com/646dd1f1a3703e451ba81ecc/649dbd4c8adf2641ff9800c2_timescale-logo.svg
+    private: false
+  runnable-list:
+    - timescaledb/stack-db
+
+stack-local-db:
+  defines: runnable
+  inherits: timescaledb/base
+  metadata:
+    name: TimescaleDB Local Stack Database
+    description: |
+      Local verification database for the standalone TimescaleDB stack flavor.
+      PostgreSQL stays private on the Monk network and is consumed by the local
+      pgweb companion.
+    tags: timescaledb, postgresql, database, standalone, local
+    website: https://www.tigerdata.com/
+    source: https://github.com/timescale/timescaledb
+    publisher: monk.io
+    icon: https://assets-global.website-files.com/646dd1f1a3703e451ba81ecc/649dbd4c8adf2641ff9800c2_timescale-logo.svg
+    private: false
+  variables:
+    db-name:
+      type: string
+      env: POSTGRES_DB
+      value: timescaledb_local
+      description: PostgreSQL database name created for the local stack flavor.
+    db-user:
+      type: string
+      env: POSTGRES_USER
+      value: timescaledb_local
+      description: PostgreSQL user created for the local stack flavor.
+    db-password:
+      type: string
+      env: POSTGRES_PASSWORD
+      value: timescaledb-local-password
+      description: Sensitive local-only PostgreSQL password for stack-local verification. Production inheritors should use secret("timescaledb-db-password").
+    volume-name:
+      type: string
+      value: timescaledb-stack-local-postgres
+      description: Monk volume subdirectory used by the local stack flavor database.
+  checks:
+    readiness:
+      code: tcp-check-service("timescaledb/stack-local-db", "postgres")
+      period: 10
+      initialDelay: 15
+      attempts: 30
+
+stack-local-admin:
+  defines: runnable
+  metadata:
+    name: TimescaleDB Local Stack pgweb
+    description: |
+      Local-only pgweb companion for verifying the standalone TimescaleDB stack.
+      It connects to the private database through Monk connections and publishes
+      a non-privileged localhost port for HTTP smoke testing.
+    tags: timescaledb, postgresql, pgweb, standalone, local
+    website: https://github.com/sosedoff/pgweb
+    source: https://github.com/sosedoff/pgweb
+    publisher: monk.io
+    icon: https://www.postgresql.org/media/img/about/press/elephant.png
+    private: false
+  variables:
+    pgweb-image-tag:
+      type: string
+      value: 0.17.0
+      description: Public sosedoff/pgweb Docker image tag used for local stack verification.
+    stack-db-name:
+      type: string
+      value: timescaledb_local
+      description: Database name used by the local stack pgweb connection URL.
+    stack-db-user:
+      type: string
+      value: timescaledb_local
+      description: Database user used by the local stack pgweb connection URL.
+    stack-db-password:
+      type: string
+      value: timescaledb-local-password
+      description: Sensitive local-only PostgreSQL password used by the local stack pgweb connection URL.
+    database-url:
+      type: string
+      env: PGWEB_DATABASE_URL
+      value: <- "postgres://" $stack-db-user ":" $stack-db-password "@" connection-hostname("db") ":" connection-port("db") "/" $stack-db-name "?sslmode=disable" concat-all
+      description: PostgreSQL connection URL assembled from the private standalone TimescaleDB service connection.
+    pgweb-host:
+      type: string
+      env: PGWEB_LISTEN
+      value: 0.0.0.0
+      description: Interface pgweb binds inside the container.
+    pgweb-port:
+      type: int
+      env: PGWEB_PORT
+      value: 8081
+      description: HTTP port pgweb listens on inside the container.
+    host-port:
+      type: int
+      value: 8145
+      description: Non-privileged host port published for local stack HTTP verification.
+  containers:
+    pgweb:
+      image: sosedoff/pgweb
+      image-tag: <- $pgweb-image-tag
+      restart: unless-stopped
+  services:
+    http:
+      container: pgweb
+      port: <- $pgweb-port
+      protocol: tcp
+      publish: true
+      host-port: <- $host-port
+      description: Local pgweb HTTP service for external standalone stack verification.
+  connections:
+    db:
+      target: timescaledb/stack-local-db
+      service: postgres
+      description: Private TimescaleDB PostgreSQL service consumed by local pgweb.
+  depends:
+    wait-for:
+      runnables:
+        - timescaledb/stack-local-db
+      timeout: 180
+  checks:
+    readiness:
+      code: http-get-service("timescaledb/stack-local-admin", "http", "/") get-member("status") 200 equal?
+      period: 10
+      initialDelay: 20
+      attempts: 30
+
+stack-local:
+  defines: process-group
+  metadata:
+    name: TimescaleDB Local Stack
+    description: |
+      Local verification flavor of the standalone TimescaleDB stack. It runs the
+      private TimescaleDB database and adds a pgweb HTTP endpoint on localhost so
+      the deployment can be checked externally without exposing PostgreSQL.
+    tags: timescaledb, postgresql, database, standalone, local
+    website: https://www.tigerdata.com/
+    source: https://github.com/timescale/timescaledb
+    publisher: monk.io
+    icon: https://assets-global.website-files.com/646dd1f1a3703e451ba81ecc/649dbd4c8adf2641ff9800c2_timescale-logo.svg
+    private: false
+  runnable-list:
+    - timescaledb/stack-local-db
+    - timescaledb/stack-local-admin
