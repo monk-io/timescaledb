@@ -1,0 +1,140 @@
+namespace: timescaledb
+
+example-db:
+  defines: runnable
+  inherits: timescaledb/base
+  metadata:
+    name: TimescaleDB Component Example Database
+    description: |
+      Local component example database inheriting the reusable TimescaleDB base.
+      It keeps PostgreSQL private on the Monk network and is paired with pgweb for
+      external HTTP verification.
+    tags: timescaledb, postgresql, database, component, example, local
+    website: https://www.tigerdata.com/
+    source: https://github.com/timescale/timescaledb
+    publisher: monk.io
+    icon: https://assets-global.website-files.com/646dd1f1a3703e451ba81ecc/649dbd4c8adf2641ff9800c2_timescale-logo.svg
+    private: false
+  variables:
+    db-name:
+      type: string
+      env: POSTGRES_DB
+      value: timescaledb_example
+      description: PostgreSQL database name created for the component example.
+    db-user:
+      type: string
+      env: POSTGRES_USER
+      value: timescaledb_example
+      description: PostgreSQL user created for the component example.
+    db-password:
+      type: string
+      env: POSTGRES_PASSWORD
+      value: timescaledb-example-local-password
+      description: Sensitive local-only PostgreSQL password for component verification. Production inheritors should use secret("timescaledb-db-password").
+    volume-name:
+      type: string
+      value: timescaledb-example-postgres
+      description: Monk volume subdirectory used by the component example database.
+  checks:
+    readiness:
+      code: tcp-check-service("timescaledb/example-db", "postgres")
+      period: 10
+      initialDelay: 15
+      attempts: 30
+
+example-admin:
+  defines: runnable
+  metadata:
+    name: TimescaleDB Component Example pgweb
+    description: |
+      Local-only pgweb companion for the TimescaleDB component example. It reads
+      database connection details from the private Monk connection and publishes
+      a non-privileged host port for HTTP smoke testing.
+    tags: timescaledb, postgresql, pgweb, component, example, local
+    website: https://github.com/sosedoff/pgweb
+    source: https://github.com/sosedoff/pgweb
+    publisher: monk.io
+    icon: https://www.postgresql.org/media/img/about/press/elephant.png
+    private: false
+  variables:
+    pgweb-image-tag:
+      type: string
+      value: 0.17.0
+      description: Public sosedoff/pgweb Docker image tag used for local verification.
+    example-db-name:
+      type: string
+      value: timescaledb_example
+      description: Database name used by the pgweb component example connection URL.
+    example-db-user:
+      type: string
+      value: timescaledb_example
+      description: Database user used by the pgweb component example connection URL.
+    example-db-password:
+      type: string
+      value: timescaledb-example-local-password
+      description: Sensitive local-only PostgreSQL password used by the pgweb component example connection URL.
+    database-url:
+      type: string
+      env: PGWEB_DATABASE_URL
+      value: <- "postgres://" $example-db-user ":" $example-db-password "@" connection-hostname("db") ":" connection-port("db") "/" $example-db-name "?sslmode=disable" concat-all
+      description: PostgreSQL connection URL assembled from the private TimescaleDB service connection.
+    pgweb-host:
+      type: string
+      env: PGWEB_LISTEN
+      value: 0.0.0.0
+      description: Interface pgweb binds inside the container.
+    pgweb-port:
+      type: int
+      env: PGWEB_PORT
+      value: 8081
+      description: HTTP port pgweb listens on inside the container.
+    host-port:
+      type: int
+      value: 8144
+      description: Non-privileged host port published for local component example HTTP verification.
+  containers:
+    pgweb:
+      image: sosedoff/pgweb
+      image-tag: <- $pgweb-image-tag
+      restart: unless-stopped
+  services:
+    http:
+      container: pgweb
+      port: <- $pgweb-port
+      protocol: tcp
+      publish: true
+      host-port: <- $host-port
+      description: Local pgweb HTTP service for external component example verification.
+  connections:
+    db:
+      target: timescaledb/example-db
+      service: postgres
+      description: Private TimescaleDB PostgreSQL service consumed by pgweb.
+  depends:
+    wait-for:
+      runnables:
+        - timescaledb/example-db
+      timeout: 180
+  checks:
+    readiness:
+      code: http-get-service("timescaledb/example-admin", "http", "/") get-member("status") 200 equal?
+      period: 10
+      initialDelay: 20
+      attempts: 30
+
+example:
+  defines: process-group
+  metadata:
+    name: TimescaleDB Component Example
+    description: |
+      Demonstrates the reusable TimescaleDB component with a private database and
+      local pgweb companion. The published pgweb port is for verification only.
+    tags: timescaledb, postgresql, component, example, local
+    website: https://www.tigerdata.com/
+    source: https://github.com/timescale/timescaledb
+    publisher: monk.io
+    icon: https://assets-global.website-files.com/646dd1f1a3703e451ba81ecc/649dbd4c8adf2641ff9800c2_timescale-logo.svg
+    private: false
+  runnable-list:
+    - timescaledb/example-db
+    - timescaledb/example-admin

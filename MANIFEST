@@ -1,0 +1,4 @@
+LOAD timescaledb.yaml
+LOAD timescaledb-example.yaml
+LOAD timescaledb-stack.yaml
+ENTRY timescaledb/stack-local
